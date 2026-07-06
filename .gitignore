@@ -3,3 +3,5 @@ results/
 __pycache__/
 ckpt/
 dater_obj.sh
+slurm/
+dataset_jpg/
