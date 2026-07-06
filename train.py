@@ -108,7 +108,7 @@ if __name__ == "__main__":
     N_CLASSES = config["data"]["n_classes"]
     collate_fn = collate_fn_fixed if config["data"]["collate_fn"] == "fixed" else collate_fn_max
 
-    LEARNING_RATE = config["training"]["lr"]
+    LEARNING_RATE = config["training"]["learning_rate"]
     WEIGHT_DECAY = config["training"]["weight_decay"]
     NUM_EPOCHS = config["training"]["num_epochs"]
     PRINT_INTERVAL = config["training"]["print_interval"]
