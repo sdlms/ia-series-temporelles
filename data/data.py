@@ -30,7 +30,7 @@ DEFAULT_DTYPE = torch.float16  # or torch.float32 for full precision
 # Répartition des départements par split
 IDS_PER_SPLIT = {
     "val": ["04", "14", "29", "31", "58", "66", "67", "77"],
-    "test": ["12", "15", "22", "26", "36", "61", "64", "68", "69", "71", "73", "75", "76", "83", "84", "85"],
+    "test": ["12", "15", "22", "26", "36", "61", "64", "68", "69", "71", "73", "75", "76", "83", "84", "85", "92", "93", "94"],
 }
 
 IDS_PER_SPLIT["train"] = ["01", "02", "03", "05", "06", "07", "09", "2A", "2B"] + [str(k) for k in range(10, 96) if str(k) not in IDS_PER_SPLIT["val"] and str(k) not in IDS_PER_SPLIT["test"] and k != 20] 
@@ -65,11 +65,11 @@ class BuildingTimeSeriesDataset(Dataset):
         self.drop_prob = drop_prob
         self.dataset_ext = dataset_ext
 
-        # Charge la liste des échantillons et les métadonnées associées
-        self.dep_ids, self.building_ids, self.samples = self._find_samples()
-
         # Année d'apparition de chaque bâtiment (référence pour le label)
         self.date_apparition = json.load(open("data/date_apparition.json", "r"))
+
+        # Charge la liste des échantillons et les métadonnées associées
+        self.dep_ids, self.building_ids, self.samples = self._find_samples()
 
         print(f"Split '{split}' chargé — {len(self.samples)} bâtiments.")
 
@@ -91,8 +91,13 @@ class BuildingTimeSeriesDataset(Dataset):
             samples.extend(dep_data.values())
             building_ids.extend(dep_data.keys())
             dep_ids.extend([dep] * len(dep_data))
-
-        return dep_ids, building_ids, samples
+        
+        # Retirer les batiments dont la date d'apparition est inconnue ou mal définie (null) 
+        building_ids_corrected = [b for b in building_ids if self.date_apparition.get(b) is not None]
+        dep_ids_corrected = [dep_ids[i] for i, b in enumerate(building_ids) if self.date_apparition.get(b) is not None]
+        samples_corrected = [samples[i] for i, b in enumerate(building_ids) if self.date_apparition.get(b) is not None]
+        
+        return dep_ids_corrected, building_ids_corrected, samples_corrected
 
     def __len__(self):
         return len(self.samples)

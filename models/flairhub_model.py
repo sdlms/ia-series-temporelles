@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from safetensors.torch import load_file
 from typing import Any
-from utils.paths import ckpt_path_flairhub_ir, ckpt_path_flairhub_rgb
+from utils.paths import ckpt_path_flairhub_ir, ckpt_path_flairhub_rgb_large, ckpt_path_flairhub_rgb_base, ckpt_path_flairhub_rgb_small, ckpt_path_flairhub_rgb_tiny
 
 
 def fuse_features(c2, c3, c4, c5):
@@ -155,6 +155,7 @@ class FlairHubModel(nn.Module):
 class FlairHubWrapper(nn.Module):
     def __init__(self,
         rgb_only: bool,
+        size: str = "base",  # tiny, small, base, large
         encoder_only: bool = True,
         fuse_mode: str = "concat",  # or average
         use_float16=False,
@@ -162,12 +163,27 @@ class FlairHubWrapper(nn.Module):
         super().__init__()
         self.rgb_only = rgb_only
         self.fuse_mode = fuse_mode
+
+        encoder_arch = {
+            'tiny': "swin_tiny_patch4_window7_224-upernet",
+            'small': "swin_small_patch4_window7_224-upernet",
+            'base': "swin_base_patch4_window12_384-upernet",
+            'large': "swin_large_patch4_window12_384-upernet"
+        }[size]
+
+        ckpt_path_flairhub_rgb = {
+            'tiny': ckpt_path_flairhub_rgb_tiny,
+            'small': ckpt_path_flairhub_rgb_small,
+            'base': ckpt_path_flairhub_rgb_base,
+            'large': ckpt_path_flairhub_rgb_large
+        }[size]
+
         self.flairhub_model_rgb = FlairHubModel(
             ckpt_path=ckpt_path_flairhub_rgb,
             encoder_input_dim=3,
             decoder_input_dim=1,
             num_classes=19,
-            encoder_arch="swin_base_patch4_window12_384-upernet",
+            encoder_arch=encoder_arch,
             img_size=512,
             encoder_only=encoder_only,
             use_float16=use_float16
@@ -178,7 +194,7 @@ class FlairHubWrapper(nn.Module):
                 encoder_input_dim=3,
                 decoder_input_dim=1,
                 num_classes=19,
-                encoder_arch="swin_base_patch4_window12_384-upernet",
+                encoder_arch=encoder_arch,
                 img_size=512,
                 encoder_only=encoder_only,
                 use_float16=use_float16

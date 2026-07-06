@@ -15,10 +15,11 @@ def segment_batch(batch, model, device):
     """Renvoie les prédictions (B, T, H, W), l'emprise (B, H, W), frame_id (B,)
     et years (B, T)."""
     images = batch["images"].to(device)            # (B, T, 4, H, W)
-    emprise = batch["emprise"].to(device)          # (B, H, W)
+    emprise = batch["emprise"].to(device).long()          # (B, H, W)
     frame_id = batch["frame_id"].to(device)        # (B,)
     n_channels = batch["n_channels"].to(device)    # (B, T, 4)
     years = batch["years"].to(device)              # (B, T)
+    building_id = batch["building_id"]                      # (B,)
 
     B, T, C, H, W = images.shape
     images_flat = images.float().reshape(B * T, C, H, W)
@@ -27,7 +28,7 @@ def segment_batch(batch, model, device):
     
     preds = torch.argmax(outputs, dim=1)           # (B*T, H, W)
     preds = preds.reshape(B, T, H, W)
-    return preds, emprise, frame_id, years
+    return preds, emprise, frame_id, years, building_id
 
 
 def predict_frame_id(preds, emprise, years, seuils, building_class_idx, detection_mode="first"):
@@ -123,14 +124,16 @@ if __name__ == "__main__":
             rgb_only=config["rgb_only"],
             encoder_only=False,
             fuse_mode="average",
-            use_float16=USE_FLOAT16
+            use_float16=USE_FLOAT16,
+            size=config["model_size"]
         )
     elif config["model"] == "flairinc":
         model = FlairIncWrapper(
             rgb_only=config["rgb_only"],
             encoder_only=False,
             fuse_mode="average",
-            use_float16=USE_FLOAT16
+            use_float16=USE_FLOAT16,
+            size=config["model_size"]
         )  
     else:
         raise ValueError(f"Unknown model {config['model']}")
@@ -154,7 +157,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for batch_id, batch in enumerate(train_loader):
-            preds, emprise, frame_id, years = segment_batch(
+            preds, emprise, frame_id, years, _ = segment_batch(
                 batch, model, device
             )
             pred_frame_id = predict_frame_id(
@@ -201,19 +204,25 @@ if __name__ == "__main__":
     print(f"Évaluation du seuil sur test — {len(test_dataset)} bâtiments, "
           f"seuil={best_seuil}%, modèle={config['model']}, rgb_only={config['rgb_only']}.")
     test_meter = AverageMeter(n_classes=N_CLASSES, n_years=N_YEARS, device=device)
+
+    all_preds, all_frame_id, all_building_id = [], [], []
     with torch.no_grad():
         for batch_id, batch in enumerate(test_loader):
-            preds, emprise, frame_id, years = segment_batch(
+            preds, emprise, frame_id, years, building_id = segment_batch(
                 batch, model, device
             )
             pred_frame_id = predict_frame_id(
-                preds, emprise, years, [best_seuil], BUILDING_CLASS_IDX
+                preds, emprise, years, [best_seuil], BUILDING_CLASS_IDX, DETECTION_MODE
             )[:, 0]  # (B,)
 
+            all_preds.extend(pred_frame_id.cpu().numpy().tolist())
+            all_frame_id.extend(frame_id.cpu().numpy().tolist())
+            all_building_id.extend(building_id)
             test_meter.update(zero_loss, pred_frame_id, frame_id, years)
 
             if (batch_id + 1) % config["print_interval"] == 0:
                 print(f"  [Iter {batch_id + 1}/{len(test_loader)}]")
+
     _, mae, signed_mae, acc, acc1, acc2 = test_meter.get_metrics()
     print(
         f"[Test - Seuil {best_seuil}%] "
@@ -231,8 +240,8 @@ if __name__ == "__main__":
     with open(os.path.join(save_path, "summary.json"), "w") as f:
         json.dump(summary, f, indent=4)
     
-    cm_frame = meters[s_idx].conf_mat_frame_id.cpu().numpy()
-    cm_year = meters[s_idx].conf_mat_year.cpu().numpy()
+    cm_frame = test_meter.conf_mat_frame_id.cpu().numpy()
+    cm_year = test_meter.conf_mat_year.cpu().numpy()
 
     df_frame = pd.DataFrame(
         cm_frame,
@@ -255,3 +264,7 @@ if __name__ == "__main__":
     df_year.to_csv(
         os.path.join(save_path, f"confusion_matrix_years.csv")
     )
+
+    output_dict = {b: (gt, pd) for b, gt, pd in zip(all_building_id, all_frame_id, all_preds)}
+    with open(os.path.join(save_path, "predictions.json"), "w") as f:
+        json.dump(output_dict, f, indent=4)
