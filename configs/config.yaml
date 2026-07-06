@@ -1,4 +1,4 @@
-exp_name: "flairhub_linear_rgb_only"
+exp_name: "flairhub_small_linear_rgb_only"
 env:
   device: "cuda"  # "cuda" or "cpu"
   num_workers: 8
@@ -13,7 +13,7 @@ data:
   data_augmentation: true
 model:
   backbone: "flairhub"  # "flairhub" or "flairinc"
-  model_size: "small"  # "tiny", "small", "base", or "large"
+  size: "small"  # "tiny", "small", "base", or "large"
   rgb_only: true
   use_float16: true
   fuse_mode: "average"  # "average" or "concat"

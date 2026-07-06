@@ -90,7 +90,7 @@ if __name__ == "__main__":
     BACKBONE = config["model"]["backbone"]
     USE_FLOAT16 = config["model"]["use_float16"]
     RGB_ONLY = config["model"]["rgb_only"]
-    MODEL_SIZE = config["model"]["model_size"]
+    MODEL_SIZE = config["model"]["size"]
 
     SEUILS = config["method"]["seuils"]
     DETECTION_MODE = config["method"]["detection_mode"]

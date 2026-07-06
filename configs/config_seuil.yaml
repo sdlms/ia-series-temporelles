@@ -12,7 +12,7 @@ data:
   building_class_idx: 1
 model:
   backbone: "flairhub"  # "flairhub" or "flairinc"
-  model_size: "small"  # "tiny", "small", "base", or "large"
+  size: "small"  # "tiny", "small", "base", or "large"
   rgb_only: true
   use_float16: true
 method:
