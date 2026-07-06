@@ -30,7 +30,7 @@ def segment_batch(batch, model, device):
     return preds, emprise, frame_id, years
 
 
-def predict_frame_id(preds, emprise, years, seuils, building_class_idx):
+def predict_frame_id(preds, emprise, years, seuils, building_class_idx, detection_mode="first"):
     """Pour chaque seuil, renvoie l'indice de la première frame valide où la
     proportion de pixels "bâtiment" dans l'emprise dépasse le seuil.
 
@@ -50,9 +50,13 @@ def predict_frame_id(preds, emprise, years, seuils, building_class_idx):
     # On masque les frames de padding (years==0 dans le collate par défaut).
     valid_mask = years > 0                                              # (B, T)
     above = above & valid_mask.unsqueeze(-1)
-    above_stable = above.flip(dims=[1]).cumprod(dim=1).flip(dims=[1])  # (B, T, S)
-    detection_found = above_stable.any(dim=1)                           # (B, S)
-    first_detection = above_stable.float().argmax(dim=1)                # (B, S)
+    if detection_mode == "first":  # returns the first frame where the threshold is exceeded
+        detection_found = above.any(dim=1)                                  # (B, S)
+        first_detection = above.float().argmax(dim=1)
+    elif detection_mode == "last":  # returns the last frame where the value is below the threshold + 1
+        above_stable = above.flip(dims=[1]).cumprod(dim=1).flip(dims=[1])  # (B, T, S)
+        detection_found = above_stable.any(dim=1)                           # (B, S)
+        first_detection = above_stable.float().argmax(dim=1)                # (B, S)
     last_valid_frame = valid_mask.long().sum(dim=1) - 1                 # (B,)
 
     pred_frame_id = torch.where(
@@ -79,6 +83,7 @@ if __name__ == "__main__":
     BUILDING_CLASS_IDX = config.get("building_class_idx", 1)
     SPLIT = config.get("split", "test")
     USE_FLOAT16 = config.get("use_float16", False)
+    DETECTION_MODE=config.get("detection_mode", "first")
     device = config["device"]
     collate_fn = collate_fn_fixed if config["collate_fn"] == "fixed" else collate_fn_max
 
@@ -153,7 +158,7 @@ if __name__ == "__main__":
                 batch, model, device
             )
             pred_frame_id = predict_frame_id(
-                preds, emprise, years, SEUILS, BUILDING_CLASS_IDX
+                preds, emprise, years, SEUILS, BUILDING_CLASS_IDX, DETECTION_MODE
             )  # (B, S)
 
             for s_idx in range(len(SEUILS)):

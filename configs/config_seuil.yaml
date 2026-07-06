@@ -17,3 +17,4 @@ building_class_idx: 1
 split: "test"  # "train", "val", "test" ou "train+val"
 root_path: 
 print_interval: 500
+detection_mode: "first"
