@@ -1,21 +1,21 @@
 exp_name: "flair_hub_seuils_rgb_only_5_small"
-model_size: "small"  # "tiny", "small", "base", or "large"
-device: "cuda"  # "cuda" or "cpu"
-batch_size: 4
-collate_fn: "fixed"  # "fixed" or "max"
-num_workers: 8
-n_classes: 10
-n_years: 26
-use_float16: true
-dataset_ext: "jpg"  # "tif", "jpg", "jpeg", or "png"
-model: "flairhub"  # "flairhub" or "flairinc"
-rgb_only: true
-# Seuils (en %) à évaluer : on cherche la première frame où la proportion
-# de pixels prédits "bâtiment" dans l'emprise dépasse le seuil.
-seuils: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95]
-# Indice de la classe "bâtiment" dans la sortie du modèle de segmentation.
-building_class_idx: 1
-split: "test"  # "train", "val", "test" ou "train+val"
-root_path: "dataset_jpg"
-print_interval: 500
-detection_mode: "first"
+env:
+  device: "cuda"  # "cuda" or "cpu"
+  num_workers: 8
+data:
+  root_path: "dataset_jpg"
+  dataset_ext: "jpg"  # "tif", "jpg", "jpeg", or "png"
+  batch_size: 4
+  collate_fn: "fixed"  # "fixed" or "max"
+  n_classes: 10
+  n_years: 26
+  building_class_idx: 1
+model:
+  backbone: "flairhub"  # "flairhub" or "flairinc"
+  model_size: "small"  # "tiny", "small", "base", or "large"
+  rgb_only: true
+  use_float16: true
+method:
+  seuils: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95]
+  print_interval: 500
+  detection_mode: "first"

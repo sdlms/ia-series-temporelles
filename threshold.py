@@ -75,18 +75,26 @@ if __name__ == "__main__":
     EXP_NAME = config["exp_name"]
     save_path = os.path.join("results", EXP_NAME)
     os.makedirs(save_path, exist_ok=True)
-    ROOT_PATH = config["root_path"]
-    BATCH_SIZE = config["batch_size"]
-    NUM_WORKERS = config["num_workers"]
-    N_CLASSES = config["n_classes"]
-    N_YEARS = config.get("n_years", 26)
-    SEUILS = config["seuils"]
-    BUILDING_CLASS_IDX = config.get("building_class_idx", 1)
-    SPLIT = config.get("split", "test")
-    USE_FLOAT16 = config.get("use_float16", False)
-    DETECTION_MODE=config.get("detection_mode", "first")
-    device = config["device"]
-    collate_fn = collate_fn_fixed if config["collate_fn"] == "fixed" else collate_fn_max
+
+    device = config["env"]["device"]
+    NUM_WORKERS = config["env"]["num_workers"]
+
+    ROOT_PATH = config["data"]["root_path"]
+    DATASET_EXT = config["data"]["dataset_ext"]
+    BATCH_SIZE = config["data"]["batch_size"]
+    N_CLASSES = config["data"]["n_classes"]
+    N_YEARS = config["data"].get("n_years", 26)
+    BUILDING_CLASS_IDX = config["data"]["building_class_idx"]
+    collate_fn = collate_fn_fixed if config["data"]["collate_fn"] == "fixed" else collate_fn_max
+
+    BACKBONE = config["model"]["backbone"]
+    USE_FLOAT16 = config["model"]["use_float16"]
+    RGB_ONLY = config["model"]["rgb_only"]
+    MODEL_SIZE = config["model"]["model_size"]
+
+    SEUILS = config["method"]["seuils"]
+    DETECTION_MODE = config["method"]["detection_mode"]
+    PRINT_INTERVAL = config["method"]["print_interval"]
 
     # Save config in results folder for reproducibility
     with open(os.path.join(save_path, "config.yaml"), "w") as f:
@@ -99,13 +107,13 @@ if __name__ == "__main__":
                                             split="train+val",
                                             norm=True,
                                             augment=False,
-                                            dataset_ext=config.get("dataset_ext", "tif")
+                                            dataset_ext=DATASET_EXT
                                             )
     test_dataset = BuildingTimeSeriesDataset(root_path=ROOT_PATH,
                                              split="test",
                                              norm=True,
                                              augment=False,
-                                             dataset_ext=config.get("dataset_ext", "tif")
+                                             dataset_ext=DATASET_EXT
                                              )
 
     train_loader = DataLoader(
@@ -119,24 +127,24 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------------------
     # 2. Modèle(s) de segmentation gelé(s)
     # ------------------------------------------------------------------------------
-    if config["model"] == "flairhub":
+    if BACKBONE == "flairhub":
         model = FlairHubWrapper(
-            rgb_only=config["rgb_only"],
+            rgb_only=RGB_ONLY,
             encoder_only=False,
             fuse_mode="average",
             use_float16=USE_FLOAT16,
-            size=config["model_size"]
+            size=MODEL_SIZE
         )
-    elif config["model"] == "flairinc":
+    elif BACKBONE == "flairinc":
         model = FlairIncWrapper(
-            rgb_only=config["rgb_only"],
+            rgb_only=RGB_ONLY,
             encoder_only=False,
             fuse_mode="average",
             use_float16=USE_FLOAT16,
-            size=config["model_size"]
+            size=MODEL_SIZE
         )  
     else:
-        raise ValueError(f"Unknown model {config['model']}")
+        raise ValueError(f"Unknown model {BACKBONE}")
 
     for p in model.parameters():
         p.requires_grad = False
@@ -153,7 +161,7 @@ if __name__ == "__main__":
     zero_loss = torch.tensor(0.0, device=device)
 
     print(f"Recherche du seuil sur train+val — {len(train_dataset)} bâtiments, "
-          f"{len(SEUILS)} seuils, modèle={config['model']}, rgb_only={config['rgb_only']}.")
+          f"{len(SEUILS)} seuils, modèle={BACKBONE}, rgb_only={RGB_ONLY}, size={MODEL_SIZE}.")
 
     with torch.no_grad():
         for batch_id, batch in enumerate(train_loader):
@@ -167,7 +175,7 @@ if __name__ == "__main__":
             for s_idx in range(len(SEUILS)):
                 meters[s_idx].update(zero_loss, pred_frame_id[:, s_idx], frame_id, years)
 
-            if (batch_id + 1) % config["print_interval"] == 0:
+            if (batch_id + 1) % PRINT_INTERVAL == 0:
                 print(f"  [Iter {batch_id + 1}/{len(train_loader)}]")
 
     # ------------------------------------------------------------------------------
@@ -202,7 +210,7 @@ if __name__ == "__main__":
 
     # Evaluer seuil sur test set
     print(f"Évaluation du seuil sur test — {len(test_dataset)} bâtiments, "
-          f"seuil={best_seuil}%, modèle={config['model']}, rgb_only={config['rgb_only']}.")
+          f"seuil={best_seuil}%, modèle={BACKBONE}, rgb_only={RGB_ONLY}, size={MODEL_SIZE}.")
     test_meter = AverageMeter(n_classes=N_CLASSES, n_years=N_YEARS, device=device)
 
     all_preds, all_frame_id, all_building_id = [], [], []
@@ -220,7 +228,7 @@ if __name__ == "__main__":
             all_building_id.extend(building_id)
             test_meter.update(zero_loss, pred_frame_id, frame_id, years)
 
-            if (batch_id + 1) % config["print_interval"] == 0:
+            if (batch_id + 1) % PRINT_INTERVAL == 0:
                 print(f"  [Iter {batch_id + 1}/{len(test_loader)}]")
 
     _, mae, signed_mae, acc, acc1, acc2 = test_meter.get_metrics()

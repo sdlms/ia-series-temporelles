@@ -40,7 +40,7 @@ def train_iteration(config, batch, model, classifier, optimizer, criterion, devi
         pooled = torch.einsum('btchw,bhw->btc', out, weight)  # (B, T, C)
         valid_mask = years > 0  # (B, T)
         pooled = pooled * valid_mask.unsqueeze(-1)  # (B, T, C)
-        if config["classifier"] == "linear":
+        if config["model"]["classifier"] == "linear":
             pooled = pooled.reshape(B, -1)  
         pooled = pooled.float()
 
@@ -75,7 +75,7 @@ def eval_iteration(config, batch, model, classifier, criterion, device='cuda'):
         pooled = torch.einsum('btchw,bhw->btc', out, weight)  # (B, T, C)
         valid_mask = years > 0  # (B, T)
         pooled = pooled * valid_mask.unsqueeze(-1)  # (B, T, C)
-        if config["classifier"] == "linear":
+        if config["model"]["classifier"] == "linear":
             pooled = pooled.reshape(B, -1)  
         pooled = pooled.float()
         logits = classifier(pooled)   # (B, 10)
@@ -90,12 +90,29 @@ if __name__ == "__main__":
     EXP_NAME = config["exp_name"]
     save_path = os.path.join("results", EXP_NAME)
     os.makedirs(save_path, exist_ok=True)
-    ROOT_PATH = config["root_path"]
-    BATCH_SIZE = config["batch_size"]
-    NUM_WORKERS = config["num_workers"]
-    N_CLASSES = config["n_classes"]
-    USE_FLOAT16 = config["use_float16"]
-    collate_fn = collate_fn_fixed if config["collate_fn"] == "fixed" else collate_fn_max
+
+    device = config["env"]["device"]
+    NUM_WORKERS = config["env"]["num_workers"]
+
+    BACKBONE = config["model"]["backbone"]
+    RGB_ONLY = config["model"]["rgb_only"]
+    MODEL_SIZE = config["model"]["size"]
+    USE_FLOAT16 = config["model"]["use_float16"]
+    FUSE_MODE = config["model"]["fuse_mode"]
+    CLASSIFIER = config["model"]["classifier"]
+
+    ROOT_PATH = config["data"]["root_path"]
+    DATASET_EXT = config["data"]["dataset_ext"]
+    BATCH_SIZE = config["data"]["batch_size"]
+    N_YEARS = config["data"].get("n_years", 26)
+    N_CLASSES = config["data"]["n_classes"]
+    collate_fn = collate_fn_fixed if config["data"]["collate_fn"] == "fixed" else collate_fn_max
+
+    LEARNING_RATE = config["training"]["lr"]
+    WEIGHT_DECAY = config["training"]["weight_decay"]
+    NUM_EPOCHS = config["training"]["num_epochs"]
+    PRINT_INTERVAL = config["training"]["print_interval"]
+    RESUME = config["training"]["resume"]
 
     # Save config in results folder for reproducibility
     with open(os.path.join(save_path, "config.yaml"), "w") as f:
@@ -107,21 +124,21 @@ if __name__ == "__main__":
     train_dataset = BuildingTimeSeriesDataset(root_path=ROOT_PATH, 
                                               split="train",
                                               norm=True,
-                                              augment=config["data_augmentation"], 
-                                              dropout_on=config["channel_dropout"],
-                                              dataset_ext=config.get("dataset_ext", "tif")
+                                              augment=config["data"]["data_augmentation"], 
+                                              dropout_on=config["data"]["channel_dropout"],
+                                              dataset_ext=DATASET_EXT
                                               )
     val_dataset = BuildingTimeSeriesDataset(root_path=ROOT_PATH,
                                             split="val",
                                             norm=True,
                                             augment=False,
-                                            dataset_ext=config.get("dataset_ext", "tif")
+                                            dataset_ext=DATASET_EXT
                                             )
     test_dataset = BuildingTimeSeriesDataset(root_path=ROOT_PATH,
                                              split="test",
                                              norm=True,
                                              augment=False,
-                                             dataset_ext=config.get("dataset_ext", "tif")
+                                             dataset_ext=DATASET_EXT
                                              )
 
     train_loader = DataLoader(
@@ -140,36 +157,36 @@ if __name__ == "__main__":
     # 2. Chargement du modèle
     # ------------------------------------------------------------------------------
 
-    if config["model"] == "flairhub":
-        feature_dim = 1920 if config["rgb_only"] or config["fuse_mode"] == "average" else 3840
+    if BACKBONE == "flairhub":
+        feature_dim = 1920 if RGB_ONLY or FUSE_MODE == "average" else 3840
         model = FlairHubWrapper(
-            rgb_only=config["rgb_only"],
-            fuse_mode=config["fuse_mode"],
+            rgb_only=RGB_ONLY,
+            fuse_mode=FUSE_MODE,
             use_float16=USE_FLOAT16
         )
-    elif config["model"] == "flairinc":
-        feature_dim = 960 if config["rgb_only"] or config["fuse_mode"] == "average" else 1920
+    elif BACKBONE == "flairinc":
+        feature_dim = 960 if RGB_ONLY or FUSE_MODE == "average" else 1920
         model = FlairIncWrapper(
-            rgb_only=config["rgb_only"],
-            fuse_mode=config["fuse_mode"],
+            rgb_only=RGB_ONLY,
+            fuse_mode=FUSE_MODE,
             use_float16=USE_FLOAT16
         )  
-    elif config["model"] == "anysat":
-        feature_dim = 1536 if config["rgb_only"] or config["fuse_mode"] == "average" else 3072
+    elif BACKBONE == "anysat":
+        feature_dim = 1536 if RGB_ONLY or FUSE_MODE == "average" else 3072
         model = AnySatWrapper(use_float16=USE_FLOAT16)
     else:
-        raise ValueError(f"Unknown model {config['model']}")
+        raise ValueError(f"Unknown model {BACKBONE}")
 
     for param in model.parameters():
         param.requires_grad = False
     model.eval()
 
-    if config['classifier'] == "linear":
+    if CLASSIFIER == "linear":
         classifier = torch.nn.Linear(feature_dim * 10, N_CLASSES)
-    elif config['classifier'] == "ltae":
+    elif CLASSIFIER == "ltae":
         classifier = Ltae(in_channels=feature_dim, n_classes=N_CLASSES, d_model=None, use_float16=False)
     else:
-        raise ValueError(f"Unknown classifier {config['classifier']}")
+        raise ValueError(f"Unknown classifier {CLASSIFIER}")
 
     # ------------------------------------------------------------------------------
     # 3. Boucle d'entraînement
@@ -177,17 +194,16 @@ if __name__ == "__main__":
 
     criterion  = torch.nn.functional.cross_entropy
     optimizer  = torch.optim.Adam(classifier.parameters(),
-                                  lr=config["learning_rate"],
-                                  weight_decay=config["weight_decay"])
+                                  lr=LEARNING_RATE,
+                                  weight_decay=WEIGHT_DECAY)
     logger = Logger(save_path)
-    n_epochs   = config["num_epochs"]
-    device = config["device"]
+    n_epochs = NUM_EPOCHS
     model = model.to(device)
     classifier = classifier.to(device)
     best_val_acc = 0.
     curr_epoch = 1
 
-    if config["resume"] and os.path.exists(os.path.join(save_path, 'classifier.pt')):
+    if RESUME and os.path.exists(os.path.join(save_path, 'classifier.pt')):
         ckpt = torch.load(os.path.join(save_path, 'classifier.pt'), map_location=device)
         classifier.load_state_dict(ckpt["classifier"])
         curr_epoch = ckpt["epoch"] + 1
@@ -200,7 +216,7 @@ if __name__ == "__main__":
         print(f"Epoch {epoch}/{n_epochs}")
         # -- Phase entraînement --
         classifier.train()
-        train_meter = AverageMeter(n_classes=N_CLASSES, n_years=26, device=device)
+        train_meter = AverageMeter(n_classes=N_CLASSES, n_years=N_YEARS, device=device)
         for batch_id, batch in enumerate(train_loader):
             logits, loss, frame_id, years = train_iteration(config, batch, model, classifier, optimizer, criterion, device)
 
@@ -208,7 +224,7 @@ if __name__ == "__main__":
                 pred = torch.argmax(logits, dim=1)          # (B,)
                 train_meter.update(loss, pred, frame_id, years)
 
-            if (batch_id + 1) % config["print_interval"] == 0:
+            if (batch_id + 1) % PRINT_INTERVAL == 0:
                 loss, _, _, acc, _, _ = train_meter.get_metrics()
                 print(f"      [Iter {batch_id + 1}/{len(train_loader)}] Train loss: {loss:.4f} | Acc: {acc * 100:.2f}%")
 
@@ -226,7 +242,7 @@ if __name__ == "__main__":
 
         # -- Phase de validation --
         classifier.eval()
-        val_meter = AverageMeter(n_classes=N_CLASSES, n_years=26, device=device)
+        val_meter = AverageMeter(n_classes=N_CLASSES, n_years=N_YEARS, device=device)
         with torch.no_grad():
             for batch_id, batch in enumerate(val_loader):
                 logits, loss, frame_id,years = eval_iteration(config, batch, model, classifier, criterion, device)
@@ -234,7 +250,7 @@ if __name__ == "__main__":
                 pred = torch.argmax(logits, dim=1)
                 val_meter.update(loss, pred, frame_id, years)
 
-                if (batch_id + 1) % config["print_interval"] == 0:
+                if (batch_id + 1) % PRINT_INTERVAL == 0:
                     loss, _, _, acc, _, _ = val_meter.get_metrics()
                     print(f"      [Iter {batch_id + 1}/{len(val_loader)}] Val   loss: {loss:.4f} | Acc: {acc * 100:.2f}%")    
         
@@ -272,7 +288,7 @@ if __name__ == "__main__":
             pred = torch.argmax(logits, dim=1)
             test_meter.update(loss, pred, frame_id, years)
 
-            if (batch_id + 1) % config["print_interval"] == 0:
+            if (batch_id + 1) % PRINT_INTERVAL == 0:
                 loss, _, _, acc, _, _ = test_meter.get_metrics()
                 print(f"  [Iter {batch_id + 1}/{len(test_loader)}] Test loss: {loss:.4f} | Acc: {acc * 100:.2f}%")
     
@@ -292,8 +308,8 @@ if __name__ == "__main__":
 
     df_frame_id = pd.DataFrame(
         confusion_matrix_frame_id,
-        index=[f"pred_{i}" for i in range(N_CLASSES)],
-        columns=[f"gt_{i}" for i in range(N_CLASSES)],
+        index=[f"gt_{i}" for i in range(N_CLASSES)],
+        columns=[f"pred_{i}" for i in range(N_CLASSES)],
     )
     df_frame_id.index.name   = "pred_frame_id"
     df_frame_id.columns.name = "gt_frame_id"
@@ -301,8 +317,8 @@ if __name__ == "__main__":
 
     df_years = pd.DataFrame(
         confusion_matrix_years,
-        index=[f"pred_{i}" for i in range(2000, confusion_matrix_years.shape[0] + 2000)],
-        columns=[f"gt_{i}" for i in range(2000, confusion_matrix_years.shape[1] + 2000)],
+        index=[f"gt_{i}" for i in range(2000, 2000 + N_YEARS)],
+        columns=[f"pred_{i}" for i in range(2000, 2000 + N_YEARS)],
     )
     df_years.index.name   = "pred_year"
     df_years.columns.name = "gt_year"

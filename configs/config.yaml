@@ -1,22 +1,26 @@
 exp_name: "flairhub_linear_rgb_only"
-device: "cuda"  # "cuda" or "cpu"
-batch_size: 4
-collate_fn: "fixed"  # "fixed" or "max"
-num_workers: 8
-# seuil_batiment: 50
-n_classes: 10
-use_float16: true
-dataset_ext: "jpg"  # "tif", "jpg", "jpeg", or "png"
-channel_dropout: true
-data_augmentation: true
-num_epochs: 50
-learning_rate: 0.0001
-weight_decay: 0.001
-rgb_only: true
-# fuse_mode: "average"  # "average" or "concat"
-model: 'flairhub'  # or 'anysat', or 'flairinc'
-classifier : 'linear'  # "ltae" or 'linear'
-root_path: 
-print_interval: 500
-fuse_mode: "concat"  # "average" or "concat"
-resume: false  # Whether to resume training from the last checkpoint in the results folder.
+env:
+  device: "cuda"  # "cuda" or "cpu"
+  num_workers: 8
+data:
+  root_path: "dataset_jpg"
+  dataset_ext: "jpg"  # "tif", "jpg", "jpeg", or "png"
+  batch_size: 4
+  collate_fn: "fixed"  # "fixed" or "max"
+  n_classes: 10
+  n_years: 26
+  channel_dropout: true
+  data_augmentation: true
+model:
+  backbone: "flairhub"  # "flairhub" or "flairinc"
+  model_size: "small"  # "tiny", "small", "base", or "large"
+  rgb_only: true
+  use_float16: true
+  fuse_mode: "average"  # "average" or "concat"
+  classifier : 'linear'  # "ltae" or 'linear'
+training:
+  num_epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.001
+  print_interval: 500
+  resume: false  # Whether to resume training from the last checkpoint in the results folder.
