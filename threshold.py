@@ -55,9 +55,11 @@ def predict_frame_id(preds, emprise, years, seuils, building_class_idx, detectio
         detection_found = above.any(dim=1)                                  # (B, S)
         first_detection = above.float().argmax(dim=1)
     elif detection_mode == "last":  # returns the last frame where the value is below the threshold + 1
-        above_stable = above.flip(dims=[1]).cumprod(dim=1).flip(dims=[1])  # (B, T, S)
-        detection_found = above_stable.any(dim=1)                           # (B, S)
-        first_detection = above_stable.float().argmax(dim=1)                # (B, S)
+        above_for_cumprod = above | ~valid_mask.unsqueeze(-1)           # (B, T, S)
+        above_stable = above_for_cumprod.float().flip(dims=[1]).cumprod(dim=1).flip(dims=[1]).bool() # (B, T, S)
+        above_stable = above_stable & valid_mask.unsqueeze(-1)          # (B, T, S)
+        detection_found = above_stable.any(dim=1)                       # (B, S)
+        first_detection = above_stable.float().argmax(dim=1)            # (B, S)
     last_valid_frame = valid_mask.long().sum(dim=1) - 1                 # (B,)
 
     pred_frame_id = torch.where(
