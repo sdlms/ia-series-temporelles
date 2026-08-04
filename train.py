@@ -13,7 +13,7 @@ from models.ltae import Ltae
 from utils.utils import visualize_time_series, compute_accuracy, compute_mae
 from utils.metrics import AverageMeter
 from utils.logger import Logger
-
+from utils.utils import soft_targets
 
 def train_iteration(config, batch, model, classifier, optimizer, criterion, device='cuda'):
     images    = batch['images'].to(device)    # (B, T, 4, H, W)
@@ -45,7 +45,10 @@ def train_iteration(config, batch, model, classifier, optimizer, criterion, devi
         pooled = pooled.float()
 
     logits = classifier(pooled)   # (B, N_CLASSES)
-    loss = criterion(logits, frame_id)
+    if config["model"]["ltae_mode"] == "att":
+        logits = logits.masked_fill(~valid_mask, -1e9)
+    target = soft_targets(frame_id, valid_mask, sigma=config["training"]["soft_sigma"])
+    loss = criterion(logits, target)
     loss.backward()
     optimizer.step()
     return logits, loss, frame_id, years
@@ -79,7 +82,10 @@ def eval_iteration(config, batch, model, classifier, criterion, device='cuda'):
             pooled = pooled.reshape(B, -1)  
         pooled = pooled.float()
         logits = classifier(pooled)   # (B, 10)
-        loss = criterion(logits, frame_id)
+        if config["model"]["ltae_mode"] == "att":
+            logits = logits.masked_fill(~valid_mask, -1e9)
+        target = soft_targets(frame_id, valid_mask, sigma=config["training"]["soft_sigma"])
+        loss = criterion(logits, target)
     return logits, loss, frame_id, years
 
 
@@ -100,6 +106,8 @@ if __name__ == "__main__":
     USE_FLOAT16 = config["model"]["use_float16"]
     FUSE_MODE = config["model"]["fuse_mode"]
     CLASSIFIER = config["model"]["classifier"]
+    LTAE_MODE = config["model"]["ltae_mode"]
+    K_KERNEL = config["model"]["k_kernel"]
 
     ROOT_PATH = config["data"]["root_path"]
     DATASET_EXT = config["data"]["dataset_ext"]
@@ -113,6 +121,7 @@ if __name__ == "__main__":
     NUM_EPOCHS = config["training"]["num_epochs"]
     PRINT_INTERVAL = config["training"]["print_interval"]
     RESUME = config["training"]["resume"]
+    SOFT_SIGMA = config["training"]["soft_sigma"]
 
     # Save config in results folder for reproducibility
     with open(os.path.join(save_path, "config.yaml"), "w") as f:
@@ -184,7 +193,7 @@ if __name__ == "__main__":
     if CLASSIFIER == "linear":
         classifier = torch.nn.Linear(feature_dim * 10, N_CLASSES)
     elif CLASSIFIER == "ltae":
-        classifier = Ltae(in_channels=feature_dim, n_classes=N_CLASSES, d_model=None, use_float16=False)
+        classifier = Ltae(in_channels=feature_dim, n_classes=N_CLASSES, d_model=None, use_float16=False, return_att=False, mode=LTAE_MODE, k_kernel=K_KERNEL)
     else:
         raise ValueError(f"Unknown classifier {CLASSIFIER}")
 
@@ -322,4 +331,4 @@ if __name__ == "__main__":
     )
     df_years.index.name   = "pred_year"
     df_years.columns.name = "gt_year"
-    df_years.to_csv(os.path.join(save_path, "confusion_matrix_years.csv"))  
+    df_years.to_csv(os.path.join(save_path, "confusion_matrix_years.csv"))
