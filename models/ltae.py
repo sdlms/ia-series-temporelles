@@ -17,7 +17,7 @@ import copy
 
 class Ltae(nn.Module):
     def __init__(self, in_channels=3840, n_head=16, d_k=8, n_classes=10, dropout=0.2, d_model=256,
-                 T=100, len_max_seq=30, positions=None, return_att=False, use_float16=False):
+                 T=100, len_max_seq=30, positions=None, return_att=False, use_float16=False, mode="mlp", k_kernel=1):
         """
         Sequence-to-embedding encoder.
         Args:
@@ -44,7 +44,7 @@ class Ltae(nn.Module):
         self.n_neurons = copy.deepcopy(n_neurons)
         self.return_att = return_att
         self.use_float16 = use_float16
-
+        self.mode = mode
 
         if positions is None:
             positions = len_max_seq + 1
@@ -66,7 +66,7 @@ class Ltae(nn.Module):
         self.outlayernorm = nn.LayerNorm(n_neurons[-1])
 
         self.attention_heads = MultiHeadAttention(
-            n_head=n_head, d_k=d_k, d_in=self.d_model)
+            n_head=n_head, d_k=d_k, d_in=self.d_model, mode=mode, k_kernel=k_kernel)
 
         assert (self.n_neurons[0] == self.d_model)
 
@@ -106,6 +106,9 @@ class Ltae(nn.Module):
 
         enc_output, attn = self.attention_heads(enc_output, enc_output, enc_output)
 
+        if self.mode == "att":
+            return attn.mean(dim=0)
+
         enc_output = enc_output.permute(1, 0, 2).contiguous().view(sz_b, -1)  # Concatenate heads
 
         enc_output = self.outlayernorm(self.dropout(self.mlp(enc_output)))
@@ -119,7 +122,7 @@ class Ltae(nn.Module):
 class MultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
-    def __init__(self, n_head, d_k, d_in):
+    def __init__(self, n_head, d_k, d_in, mode="mlp", k_kernel=1):
         super().__init__()
         self.n_head = n_head
         self.d_k = d_k
@@ -128,10 +131,12 @@ class MultiHeadAttention(nn.Module):
         self.Q = nn.Parameter(torch.zeros((n_head, d_k))).requires_grad_(True)
         nn.init.normal_(self.Q, mean=0, std=np.sqrt(2.0 / (d_k)))
 
-        self.fc1_k = nn.Linear(d_in, n_head * d_k)
-        nn.init.normal_(self.fc1_k.weight, mean=0, std=np.sqrt(2.0 / (d_k)))
+        self.fc1_k = nn.Conv1d(d_in, n_head * d_k,
+                       kernel_size=k_kernel,
+                       padding=k_kernel // 2)
+        nn.init.normal_(self.fc1_k.weight, mean=0, std=np.sqrt(2.0 / (d_k)) / np.sqrt(k_kernel))
 
-        self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
+        self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5), mode="mlp")
 
     def forward(self, q, k, v):
         d_k, d_in, n_head = self.d_k, self.d_in, self.n_head
@@ -139,7 +144,8 @@ class MultiHeadAttention(nn.Module):
 
         q = torch.stack([self.Q for _ in range(sz_b)], dim=1).view(-1, d_k)  # (n*b) x d_k
 
-        k = self.fc1_k(v).view(sz_b, seq_len, n_head, d_k)
+        k = self.fc1_k(v.permute(0, 2, 1)).permute(0, 2, 1)
+        k = k.view(sz_b, seq_len, n_head, d_k)
         k = k.permute(2, 0, 1, 3).contiguous().view(-1, seq_len, d_k)  # (n*b) x lk x dk
 
         v = torch.stack(v.split(v.shape[-1] // n_head, dim=-1)).view(n_head * sz_b, seq_len, -1)
@@ -156,18 +162,20 @@ class MultiHeadAttention(nn.Module):
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
-    def __init__(self, temperature, attn_dropout=0.1):
+    def __init__(self, temperature, attn_dropout=0.1, mode="mlp"):
         super().__init__()
         self.temperature = temperature
         self.dropout = nn.Dropout(attn_dropout)
         self.softmax = nn.Softmax(dim=2)
+        self.mode = mode
 
     def forward(self, q, k, v):
         attn = torch.matmul(q.unsqueeze(1), k.transpose(1, 2))
         attn = attn / self.temperature
-
-        attn = self.softmax(attn)
-        attn = self.dropout(attn)
+        
+        if self.mode == "mlp":
+            attn = self.softmax(attn)
+            attn = self.dropout(attn)
         output = torch.matmul(attn, v)
 
         return output, attn
