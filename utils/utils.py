@@ -200,3 +200,17 @@ def _normalize_for_display(image):
     if vmax - vmin > 1e-6:
         return (image - vmin) / (vmax - vmin)
     return np.zeros_like(image)
+
+def soft_targets(frame_id, valid_mask, sigma=0.5):
+    """Cible souple gaussienne centrée sur frame_id, lissée dans l'espace des frames."""
+    B, T = valid_mask.shape
+    pos = torch.arange(T, device=frame_id.device)[None, :]
+    d = (pos - frame_id[:, None]).float()                    # (B, T), signé
+
+    if sigma <= 0:
+        w = (d == 0).float()                                 # one-hot
+    else:
+        w = torch.exp(-d.pow(2) / (2 * sigma ** 2))
+
+    w = w * valid_mask
+    return w / w.sum(dim=1, keepdim=True)
